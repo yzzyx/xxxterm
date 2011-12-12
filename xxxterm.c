@@ -4573,6 +4573,7 @@ go_up(struct tab *t, struct karg *args)
 	int		 levels;
 	char		*uri;
 	char		*tmp;
+	char		*p;
 
 	levels = atoi(args->s);
 	if (levels == 0)
@@ -4583,12 +4584,24 @@ go_up(struct tab *t, struct karg *args)
 		return (1);
 	tmp += strlen(XT_PROTO_DELIM);
 
+	/* go to top */
+	if (args->i == 1){
+		p = strchr(tmp, '/');
+
+		if( p != NULL ){
+			*(p+1) = '\0';
+			load_uri(t, uri);
+		}
+
+		g_free(uri);
+		return (0);
+	}
+
 	/* if an uri starts with a slash, leave it alone (for file:///) */
 	if (tmp[0] == '/')
 		tmp++;
 
 	while (levels--) {
-		char	*p;
 
 		p = strrchr(tmp, '/');
 		if (p != NULL)
@@ -4710,6 +4723,7 @@ struct buffercmd {
 	regex_t		cregex;
 } buffercmds[] = {
 	{ "^[0-9]*gu$",		XT_PRE_MAYBE,	"gu",	go_up,		0 },
+	{ "^gU$",		XT_PRE_MAYBE,	"gU",	go_up,		1 },
 	{ "^gg$",		XT_PRE_NO,	"gg",	move,		XT_MOVE_TOP },
 	{ "^gG$",		XT_PRE_NO,	"gG",	move,		XT_MOVE_BOTTOM },
 	{ "^[0-9]+%$",		XT_PRE_YES,	"%",	move,		XT_MOVE_PERCENT },
