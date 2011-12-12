@@ -4624,7 +4624,10 @@ gototab(struct tab *t, struct karg *args)
 
 	tab = atoi(args->s);
 
-	arg.i = XT_TAB_NEXT;
+	if( args->i == 0 )
+		arg.i = XT_TAB_NEXT;
+	else
+		arg.i = args->i;
 	arg.precount = tab;
 
 	movetab(t, &arg);
@@ -4732,6 +4735,8 @@ struct buffercmd {
 	{ "^m[a-zA-Z0-9]$",	XT_PRE_NO,	"m",	mark,		XT_MARK_SET },
 	{ "^['][a-zA-Z0-9]$",	XT_PRE_NO,	"'",	mark,		XT_MARK_GOTO },
 	{ "^[0-9]+t$",		XT_PRE_YES,	"t",	gototab,	0 },
+	{ "^g0$",		XT_PRE_YES,	"g0",	gototab,	XT_TAB_FIRST },
+	{ "^g[$]$",		XT_PRE_YES,	"g$",	gototab,	XT_TAB_LAST },
 	{ "^[0-9]*gt$",		XT_PRE_YES,	"t",	gotonexttab,	0 },
 	{ "^[0-9]*gT$",		XT_PRE_YES,	"t",	gotoprevtab,	0 },
 	{ "^M[a-zA-Z0-9]$",	XT_PRE_NO,	"M",	qmark,		XT_QMARK_SET },
