@@ -224,6 +224,7 @@ struct tab {
 	/* settings */
 	WebKitWebSettings	*settings;
 	gchar			*user_agent;
+	gboolean	load_images;
 
 	/* marks */
 	double			mark[XT_NOMARKS];
