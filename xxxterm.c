@@ -1465,6 +1465,122 @@ toggle_src(struct tab *t, struct karg *args)
 	return (0);
 }
 
+int
+edit_src(struct tab *t, struct karg *args)
+{
+	int fd;
+	char *filename;
+	char *tmpdir = "/tmp";
+	char command[PATH_MAX];
+	char *ptr;
+	int nb, rv;
+
+	WebKitWebFrame *frame;
+	WebKitWebDataSource *ds;
+	GString *contents;
+
+	if (external_editor == NULL)
+		return (0);
+
+	frame = webkit_web_view_get_focused_frame(t->wv);
+	ds = webkit_web_frame_get_data_source(frame);
+	if (webkit_web_data_source_is_loading(ds)){
+		show_oops(t,"Webbpage is still loading.");
+		return (0);
+	}
+
+	contents = webkit_web_data_source_get_data(ds);
+	if( !contents )
+		show_oops(t,"No contents - opening empty file");
+
+	if (P_tmpdir != NULL)
+		tmpdir = P_tmpdir;
+
+	filename = malloc(strlen(tmpdir) + 14);
+	sprintf(filename, "%s/xxxtermXXXXXX", tmpdir);
+
+	/* Create a temporary file */
+	fd = mkstemp(filename);
+
+	nb = 0;
+	while( nb < contents->len ){
+		rv = write(fd, contents->str+nb, 1024);
+		if( rv < 0 ){
+			free(filename);
+			close(fd);
+			show_oops(t,strerror(errno));
+			return (-1);
+		}
+		nb += rv;
+	}
+
+	DPRINTF("edit_src: external_editor: %s\n", external_editor);
+
+	nb = 0;
+	//n_args = 0;
+	for (ptr = external_editor; nb < sizeof(command) - 1 && *ptr; ptr++){
+
+		/*
+		if( *ptr == arg_char )
+			argv[n_args][nb] = '\0';
+			if( n_args == MAX_ARGS ){
+				for(i=0;i<n_args;i++) free(argv[i]);
+				show_oops(t, "Too many arguments to command");
+			}
+			argv[++n_args] = malloc(sizeof(char) * n);
+		}else if( *ptr == '"' ){
+			in_arg = 1;
+			continue;
+		}
+		*/
+
+		if( *ptr == '<' ){
+			if( strncasecmp(ptr, "<file>", 6) == 0 ){
+				strncpy(command+nb, filename, sizeof(command) - nb - 1);
+				ptr += 5; nb += strlen(filename);
+			}
+		}else
+			command[nb++] = *ptr;
+	}
+	command[nb] = '\0';
+
+	DPRINTF("edit_src: Launching program %s\n", command);
+
+	free(filename);
+
+	/* Launch editor */
+	switch (fork()) {
+	case -1:
+		show_oops(t, "can't fork to execute editor");
+		return (1);
+		/* NOTREACHED */
+	case 0:
+		break;
+	default:
+		return (0);
+	}
+
+	/* child */
+
+	/* FIXME!
+	 * check if file changes, and
+	 * reload page
+	 */
+	rv = system(command);
+	close(fd);
+
+	/* Delete the file */
+	unlink(filename);
+
+	_exit(0);
+
+	/* NOTREACHED */
+	
+
+
+	return (0);
+}
+
 void
 focus_webview(struct tab *t)
 {
@@ -2979,6 +3095,7 @@ struct cmd {
 	{ "hinting",		0,	command,		'.',			0 },
 	{ "hinting_newtab",	0,	command,		',',			0 },
 	{ "togglesrc",		0,	toggle_src,		0,			0 },
+	{ "editsrc",		0,	edit_src,		0,			0 },
 
 	/* yanking and pasting */
 	{ "yankuri",		0,	yank_uri,		0,			0 },

@@ -58,6 +58,7 @@ int		enable_cookie_whitelist = 0;
 int		enable_js_whitelist = 0;
 int		session_timeout = 3600; /* cookie session timeout */
 int		cookie_policy = SOUP_COOKIE_JAR_ACCEPT_ALWAYS;
+char		*external_editor = NULL;
 char		*ssl_ca_file = NULL;
 char		*resource_dir = NULL;
 gboolean	ssl_strict_certs = FALSE;
@@ -281,6 +282,7 @@ struct settings		rs[] = {
 	{ "enable_socket",		XT_S_INT, XT_SF_RESTART,&enable_socket, NULL, NULL },
 	{ "enable_spell_checking",	XT_S_INT, 0,		&enable_spell_checking, NULL, NULL },
 	{ "encoding",			XT_S_STR, 0, NULL,	&encoding, NULL },
+	{ "external_editor",			XT_S_STR,0, NULL,	&external_editor, NULL, NULL, set_external_editor },
 	{ "fancy_bar",			XT_S_INT, XT_SF_RESTART,&fancy_bar, NULL, NULL },
 	{ "guess_search",		XT_S_INT, 0,		&guess_search, NULL, NULL },
 	{ "history_autosave",		XT_S_INT, 0,		&history_autosave, NULL, NULL },

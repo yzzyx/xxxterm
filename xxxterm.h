@@ -515,6 +515,7 @@ extern int	append_next;
 extern char	*home;
 extern char	*search_string;
 extern char	*http_proxy;
+extern char	*external_editor;
 extern char	download_dir[PATH_MAX];
 extern char	runtime_settings[PATH_MAX];
 extern int	allow_volatile_cookies;
