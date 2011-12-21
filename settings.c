@@ -88,6 +88,7 @@ char		*encoding = NULL;
 int		autofocus_onload = 0;
 int		js_autorun_enabled = 1;
 int		edit_mode = XT_EM_HYBRID;
+int		auto_load_images = 1;
 
 char		*cmd_font_name = NULL;
 char		*oops_font_name = NULL;
@@ -116,6 +117,7 @@ int		set_tab_style(struct settings *, char *);
 int		set_edit_mode(struct settings *, char *);
 int		set_work_dir(struct settings *, char *);
 int		set_ua_roundrobin(char *);
+int		set_auto_load_images(char *value);
 int		set_external_editor(char *);
 
 void		walk_mime_type(struct settings *, void (*)(struct settings *,
@@ -155,16 +157,6 @@ set_http_proxy(char *proxy)
 
 	soup_uri_free(uri);
 
-	return (0);
-}
-
-int
-set_external_editor(char *editor)
-{
-	if (external_editor)
-		g_free(external_editor);
-
-	external_editor = g_strdup(editor);
 	return (0);
 }
 
@@ -313,6 +305,7 @@ struct settings		rs[] = {
 	{ "work_dir",			XT_S_STR, 0, NULL, NULL,&s_work_dir },
 	{ "xterm_workaround",		XT_S_INT, 0,		&xterm_workaround, NULL, NULL },
 	{ "user_agent_roundrobin",	XT_S_INT, 0, 	&user_agent_roundrobin, NULL, NULL, NULL, set_ua_roundrobin },
+	{ "auto_load_images",	XT_S_INT, 0, 	&auto_load_images, NULL, NULL, NULL, set_auto_load_images },
 
 	/* font settings */
 	{ "cmd_font",			XT_S_STR, 0, NULL, &cmd_font_name, NULL },
@@ -980,6 +973,20 @@ int
 set_ua_roundrobin(char *value)
 {
 	user_agent_roundrobin = atoi(value);
+	return (0);
+}
+
+int
+set_auto_load_images(char *value)
+{
+	struct tab *t;
+
+	auto_load_images = atoi(value);
+	TAILQ_FOREACH(t, &tabs, entry){
+		g_object_set(G_OBJECT(t->settings),
+	    "auto-load-images", auto_load_images, (char *)NULL);
+		webkit_web_view_set_settings(t->wv, t->settings);
+	}
 	return (0);
 }
 

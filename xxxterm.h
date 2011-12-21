@@ -542,6 +542,7 @@ extern char	*oops_font_name;
 extern char	*statusbar_font_name;
 extern char	*tabbar_font_name;
 extern int	edit_mode;
+extern int	auto_load_images;
 
 /* globals */
 extern char		*version;

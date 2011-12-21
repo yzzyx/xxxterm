@@ -5805,6 +5805,8 @@ setup_webkit(struct tab *t)
 	    "enable-developer-extras", TRUE, (char *)NULL);
 	g_object_set(G_OBJECT(t->wv),
 	    "full-content-zoom", TRUE, (char *)NULL);
+	g_object_set(G_OBJECT(t->settings),
+	    "auto-load-images", auto_load_images, (char *)NULL);
 
 	webkit_web_view_set_settings(t->wv, t->settings);
 }
