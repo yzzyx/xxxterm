@@ -1475,6 +1475,8 @@ edit_src(struct tab *t, struct karg *args)
 	char *ptr;
 	int nb, rv;
 
+	pid_t pid;
+
 	WebKitWebFrame *frame;
 	WebKitWebDataSource *ds;
 	GString *contents;
@@ -1485,7 +1487,7 @@ edit_src(struct tab *t, struct karg *args)
 	frame = webkit_web_view_get_focused_frame(t->wv);
 	ds = webkit_web_frame_get_data_source(frame);
 	if (webkit_web_data_source_is_loading(ds)){
-		show_oops(t,"Webbpage is still loading.");
+		show_oops(t,"Webpage is still loading.");
 		return (0);
 	}
 
@@ -1549,7 +1551,8 @@ edit_src(struct tab *t, struct karg *args)
 	free(filename);
 
 	/* Launch editor */
-	switch (fork()) {
+	pid = fork();
+	switch (pid) {
 	case -1:
 		show_oops(t, "can't fork to execute editor");
 		return (1);
@@ -1557,6 +1560,55 @@ edit_src(struct tab *t, struct karg *args)
 	case 0:
 		break;
 	default:
+
+		/* Check for changes to the file */
+
+		/* FIXME - do this in a thread */
+		for(;;){
+			int status;
+
+			rv = waitpid(pid, &status, 0);
+
+			if( rv == -1 || WIFEXITED(status) ) break;
+		}
+
+		DPRINTF("rv: %d\n", rv);
+
+		/* FIXME - check if file has changed */
+
+		contents = g_string_sized_new(1024);
+		lseek(fd, SEEK_SET, 0);
+
+		char buf[1024];
+		nb = 0;
+		for (;;){
+			rv = read(fd, buf, 1024);
+			if (rv < 0){
+				close(fd);
+				g_string_free(contents, TRUE);
+				show_oops(t,strerror(errno));
+				return (-1);
+			}
+			
+			buf[rv] = '\0';
+			contents = g_string_append(contents, buf);
+
+			if( rv < 1024 )
+				break;
+		}
+
+		DPRINTF("edit_src: new contents: %s\n",contents->str);
+
+		webkit_web_frame_load_string(frame, contents->str,
+				NULL, webkit_web_data_source_get_encoding(ds),
+				webkit_web_frame_get_uri(frame));
+
+		close(fd);
+		/* Delete the file */
+		unlink(filename);
+
+		g_string_free(contents, TRUE);
+
 		return (0);
 	}
 
@@ -1567,10 +1619,6 @@ edit_src(struct tab *t, struct karg *args)
 	 * reload page
 	 */
 	rv = system(command);
-	close(fd);
-
-	/* Delete the file */
-	unlink(filename);
 
 	_exit(0);
 
