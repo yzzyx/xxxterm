@@ -158,16 +158,6 @@ set_http_proxy(char *proxy)
 	return (0);
 }
 
-int
-set_external_editor(char *editor)
-{
-	if (external_editor)
-		g_free(external_editor);
-
-	external_editor = g_strdup(editor);
-	return (0);
-}
-
 struct special {
 	int		(*set)(struct settings *, char *);
 	char		*(*get)(struct settings *);
