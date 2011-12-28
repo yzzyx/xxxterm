@@ -1465,6 +1465,101 @@ toggle_src(struct tab *t, struct karg *args)
 	return (0);
 }
 
+
+struct external_editor_args{
+		int fd;
+		int child_pid;
+		char *path;
+		struct tab *tab;
+		WebKitWebFrame *frame;
+		WebKitWebDataSource *data_src;
+		time_t mtime;
+};
+
+/*
+ * Execute command, and wait for child to return,
+ * while watching if a file is updated. If it is,
+ * it's contents is sent to 'callback'
+ */
+int
+external_editor_cb(gpointer data)
+{
+	struct external_editor_args *args;
+	struct stat st;
+
+	int rv, nb;
+	int status;
+
+	GString *contents;
+	contents = NULL;
+
+	args = (struct external_editor_args *)data;
+
+
+	rv = fstat(args->fd, &st);
+	if (rv == -1){
+		show_oops(args->tab, "fstat error");
+
+		close(args->fd);
+		free(args->path);
+		return (0);
+	}
+
+	if (st.st_mtime > args->mtime){
+		DPRINTF("File %s has been modified\n", args->path);
+		args->mtime = st.st_mtime;
+
+		contents = g_string_sized_new(1024);
+		rv = lseek(args->fd, SEEK_SET, 0);
+		if (rv == -1){
+			close(args->fd);
+			free(args->path);
+			free(args);
+			return 0;
+		}
+
+		char buf[1024];
+		nb = 0;
+		for (;;){
+			nb = read(args->fd, buf, 1024);
+			if (nb < 0){
+				g_string_free(contents, TRUE);
+				show_oops(args->tab,strerror(errno));
+				close(args->fd);
+				free(args->path);
+				free(args);
+				return (0);
+			}
+
+			buf[nb] = '\0';
+			contents = g_string_append(contents, buf);
+
+			if (nb < 1024)
+				break;
+		}
+
+		DPRINTF("edit_src: contents updated\n");
+		webkit_web_frame_load_string(args->frame, contents->str,
+				NULL, webkit_web_data_source_get_encoding(args->data_src),
+				webkit_web_frame_get_uri(args->frame));
+
+		g_string_free(contents, TRUE);
+	}
+
+	/* Check if child has terminated */
+	rv = waitpid(args->child_pid, &status, WNOHANG);
+	if (rv == -1 || WIFEXITED(status)){
+		close(args->fd);
+		/* Delete the file */
+		unlink(args->path);
+		free(args->path);
+		free(args);
+		return 0;
+	}
+
+	return (1);
+}
+
 int
 edit_src(struct tab *t, struct karg *args)
 {
@@ -1473,7 +1568,9 @@ edit_src(struct tab *t, struct karg *args)
 	char *tmpdir = "/tmp";
 	char command[PATH_MAX];
 	char *ptr;
+	char *suffix = ".html";
 	int nb, rv;
+	int cnt;
 
 	pid_t pid;
 
@@ -1498,22 +1595,29 @@ edit_src(struct tab *t, struct karg *args)
 	if (P_tmpdir != NULL)
 		tmpdir = P_tmpdir;
 
-	filename = malloc(strlen(tmpdir) + 14);
-	sprintf(filename, "%s/xxxtermXXXXXX", tmpdir);
+	filename = malloc(strlen(tmpdir) + strlen(suffix) + 1);
+	sprintf(filename, "%s/xxxtermXXXXXX%s", tmpdir, suffix);
 
 	/* Create a temporary file */
-	fd = mkstemp(filename);
+	fd = mkstemps(filename,strlen(suffix));
+	if( fd == -1 ){
+		show_oops(t, "Cannot create temporary file");
+		return(-1);
+	}
 
 	nb = 0;
 	while( nb < contents->len ){
-		rv = write(fd, contents->str+nb, 1024);
+
+		if( contents->len - nb > 1024 ) cnt = 1024;
+		else cnt = contents->len - nb;
+
+		rv = write(fd, contents->str+nb, cnt);
 		if( rv < 0 ){
 			free(filename);
 			close(fd);
 			show_oops(t,strerror(errno));
 			return (-1);
-		}
-		nb += rv;
+		} nb += rv;
 	}
 
 	DPRINTF("edit_src: external_editor: %s\n", external_editor);
@@ -1548,84 +1652,41 @@ edit_src(struct tab *t, struct karg *args)
 
 	DPRINTF("edit_src: Launching program %s\n", command);
 
-	free(filename);
-
 	/* Launch editor */
 	pid = fork();
 	switch (pid) {
-	case -1:
-		show_oops(t, "can't fork to execute editor");
-		return (1);
-		/* NOTREACHED */
-	case 0:
-		break;
-	default:
+		case -1:
+			show_oops(t, "can't fork to execute editor");
+			return (1);
+			/* NOTREACHED */
+		case 0:
+			break;
+		default:
+			{
+			struct external_editor_args *ext_args;
 
-		/* Check for changes to the file */
+			ext_args = malloc(sizeof(struct external_editor_args));
+			ext_args->child_pid = pid;
+			ext_args->fd = fd;
+			ext_args->path = g_strdup(filename);
+			ext_args->frame = frame;
+			ext_args->data_src = ds;
+			ext_args->mtime = time(NULL);
 
-		/* FIXME - do this in a thread */
-		for(;;){
-			int status;
+			free(filename);
 
-			rv = waitpid(pid, &status, 0);
-
-			if( rv == -1 || WIFEXITED(status) ) break;
-		}
-
-		DPRINTF("rv: %d\n", rv);
-
-		/* FIXME - check if file has changed */
-
-		contents = g_string_sized_new(1024);
-		lseek(fd, SEEK_SET, 0);
-
-		char buf[1024];
-		nb = 0;
-		for (;;){
-			rv = read(fd, buf, 1024);
-			if (rv < 0){
-				close(fd);
-				g_string_free(contents, TRUE);
-				show_oops(t,strerror(errno));
-				return (-1);
+			/* Check every 100 ms if file has changed */
+			g_timeout_add(100, (GSourceFunc)external_editor_cb, (gpointer)ext_args);
 			}
-			
-			buf[rv] = '\0';
-			contents = g_string_append(contents, buf);
 
-			if( rv < 1024 )
-				break;
-		}
-
-		DPRINTF("edit_src: new contents: %s\n",contents->str);
-
-		webkit_web_frame_load_string(frame, contents->str,
-				NULL, webkit_web_data_source_get_encoding(ds),
-				webkit_web_frame_get_uri(frame));
-
-		close(fd);
-		/* Delete the file */
-		unlink(filename);
-
-		g_string_free(contents, TRUE);
-
-		return (0);
+			return (0);
 	}
 
 	/* child */
-
-	/* FIXME!
-	 * check if file changes, and
-	 * reload page
-	 */
 	rv = system(command);
 
 	_exit(0);
-
 	/* NOTREACHED */
-	
-
-
 	return (0);
 }
 
