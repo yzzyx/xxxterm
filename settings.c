@@ -68,6 +68,7 @@ char		*http_proxy = NULL;
 char		download_dir[PATH_MAX];
 char		runtime_settings[PATH_MAX]; /* override of settings */
 int		allow_volatile_cookies = 0;
+int		color_visited_uris = 1;
 int		save_global_history = 0; /* save global history to disk */
 struct user_agent	*user_agent = NULL;
 int		user_agent_roundrobin = 0; /* change user-agent after each request */
@@ -88,6 +89,7 @@ char		*encoding = NULL;
 int		autofocus_onload = 0;
 int		js_autorun_enabled = 1;
 int		edit_mode = XT_EM_HYBRID;
+int		userstyle_global = 0;
 
 char		*cmd_font_name = NULL;
 char		*oops_font_name = NULL;
@@ -116,7 +118,6 @@ int		set_tab_style(struct settings *, char *);
 int		set_edit_mode(struct settings *, char *);
 int		set_work_dir(struct settings *, char *);
 int		set_ua_roundrobin(char *);
-int		set_external_editor(char *);
 
 void		walk_mime_type(struct settings *, void (*)(struct settings *,
 		    char *, void *), void *);
@@ -255,6 +256,7 @@ struct settings		rs[] = {
 	{ "append_next",		XT_S_INT, 0,		&append_next, NULL, NULL },
 	{ "autofocus_onload",		XT_S_INT, 0,		&autofocus_onload, NULL, NULL },
 	{ "browser_mode",		XT_S_INT, 0, NULL, NULL,&s_browser_mode },
+	{ "color_visited_uris",		XT_S_INT, 0,		&color_visited_uris, NULL, NULL },
 	{ "cookie_policy",		XT_S_INT, 0, NULL, NULL,&s_cookie },
 	{ "cookies_enabled",		XT_S_INT, 0,		&cookies_enabled, NULL, NULL },
 	{ "ctrl_click_focus",		XT_S_INT, 0,		&ctrl_click_focus, NULL, NULL },
@@ -302,7 +304,7 @@ struct settings		rs[] = {
 	{ "window_width",		XT_S_INT, 0,		&window_width, NULL, NULL },
 	{ "work_dir",			XT_S_STR, 0, NULL, NULL,&s_work_dir },
 	{ "xterm_workaround",		XT_S_INT, 0,		&xterm_workaround, NULL, NULL },
-	{ "user_agent_roundrobin",	XT_S_INT, 0, 	&user_agent_roundrobin, NULL, NULL, NULL, set_ua_roundrobin },
+	{ "user_agent_roundrobin",	XT_S_INT, 0,	&user_agent_roundrobin, NULL, NULL, NULL, set_ua_roundrobin },
 
 	/* font settings */
 	{ "cmd_font",			XT_S_STR, 0, NULL, &cmd_font_name, NULL },
@@ -692,6 +694,7 @@ struct key_binding	keys[] = {
 
 	/* custom stylesheet */
 	{ "userstyle",		0,	0,	GDK_s		},
+	{ "userstyle_global",	SHFT,	0,	GDK_S		},
 
 	/* navigation */
 	{ "goback",		0,	0,	GDK_BackSpace	},

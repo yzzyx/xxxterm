@@ -41,6 +41,8 @@ u_int32_t		swm_debug = 0
 			    | XT_D_CLIP
 			    | XT_D_BUFFERCMD
 			    | XT_D_INSPECTOR
+			    | XT_D_VISITED
+			    | XT_D_HISTORY
 			    ;
 #endif
 
@@ -95,6 +97,11 @@ TAILQ_HEAD(command_list, command_entry);
 #define XT_DLMAN_REFRESH	"10"
 #define XT_MAX_URL_LENGTH	(4096) /* 1 page is atomic, don't make bigger */
 #define XT_MAX_UNDO_CLOSE_TAB	(32)
+#define XT_MAX_HL_PURGE_COUNT	(1000) /* Purge the history for every
+					* MAX_HL_PURGE_COUNT items inserted into
+					* history and delete all items older
+					* than MAX_HISTORY_AGE. */
+#define XT_MAX_HISTORY_AGE	(60.0 * 60.0 * 24 * 14) /* 14 days */
 #define XT_RESERVED_CHARS	"$&+,/:;=?@ \"<>#%%{}|^~[]`"
 #define XT_PRINT_EXTRA_MARGIN	10
 #define XT_URL_REGEX		("^[[:blank:]]*[^[:blank:]]*([[:alnum:]-]+\\.)+[[:alnum:]-][^[:blank:]]*[[:blank:]]*$")
@@ -169,6 +176,9 @@ TAILQ_HEAD(command_list, command_entry);
 #define XT_SEARCH_NEXT		(1)
 #define XT_SEARCH_PREV		(2)
 
+#define XT_STYLE_CURRENT_TAB	(0)
+#define XT_STYLE_GLOBAL		(1)
+
 #define XT_PASTE_CURRENT_TAB	(0)
 #define XT_PASTE_NEW_TAB	(1)
 
@@ -223,6 +233,7 @@ GtkWidget		*tab_bar;
 GtkWidget		*arrow, *abtn;
 struct tab_list		tabs;
 struct history_list	hl;
+int			hl_purge_count = 0;
 struct session_list	sessions;
 struct domain_list	c_wl;
 struct domain_list	js_wl;
@@ -829,7 +840,7 @@ get_uri(struct tab *t)
 	const gchar		*uri = NULL;
 
 	if (webkit_web_view_get_load_status(t->wv) == WEBKIT_LOAD_FAILED)
-		return NULL;
+		return (NULL);
 	if (t->xtp_meaning == XT_XTP_TAB_MEANING_NORMAL) {
 		uri = webkit_web_view_get_uri(t->wv);
 	} else {
@@ -1029,38 +1040,118 @@ hint(struct tab *t, struct karg *args)
 void
 apply_style(struct tab *t)
 {
+	t->styled = 1;
 	g_object_set(G_OBJECT(t->settings),
 	    "user-stylesheet-uri", t->stylesheet, (char *)NULL);
+}
+
+void
+remove_style(struct tab *t)
+{
+	t->styled = 0;
+	g_object_set(G_OBJECT(t->settings),
+	    "user-stylesheet-uri", NULL, (char *)NULL);
 }
 
 int
 userstyle(struct tab *t, struct karg *args)
 {
+	struct tab		*tt;
+
 	DNPRINTF(XT_D_JS, "userstyle: tab %d\n", t->tab_id);
 
-	if (t->styled) {
-		t->styled = 0;
-		g_object_set(G_OBJECT(t->settings),
-		    "user-stylesheet-uri", NULL, (char *)NULL);
-	} else {
-		t->styled = 1;
-		apply_style(t);
+	switch (args->i) {
+	case XT_STYLE_CURRENT_TAB:
+		if (t->styled)
+			remove_style(t);
+		else
+			apply_style(t);
+		break;
+	case XT_STYLE_GLOBAL:
+		if (userstyle_global) {
+			userstyle_global = 0;
+			TAILQ_FOREACH(tt, &tabs, entry)
+				remove_style(tt);
+		} else {
+			userstyle_global = 1;
+			TAILQ_FOREACH(tt, &tabs, entry)
+				apply_style(tt);
+		}
+		break;
 	}
+
 	return (0);
 }
 
-/*
- * Doesn't work fully, due to the following bug:
- * https://bugs.webkit.org/show_bug.cgi?id=51747
- */
+int
+purge_history(void)
+{
+	struct history		*h, *next;
+	double			age = 0.0;
+
+	DNPRINTF(XT_D_HISTORY, "%s: hl_purge_count = %d (%d is max)\n",
+	    __func__, hl_purge_count, XT_MAX_HL_PURGE_COUNT);
+
+	if (hl_purge_count == XT_MAX_HL_PURGE_COUNT) {
+		hl_purge_count = 0;
+
+		for (h = RB_MIN(history_list, &hl); h != NULL; h = next) {
+
+			next = RB_NEXT(history_list, &hl, h);
+
+			age = difftime(time(NULL), h->time);
+
+			if (age > XT_MAX_HISTORY_AGE) {
+				DNPRINTF(XT_D_HISTORY, "%s: removing %s (age %.1f)\n",
+				    __func__, h->uri, age);
+
+				RB_REMOVE(history_list, &hl, h);
+				g_free(h->uri);
+				g_free(h->title);
+				g_free(h);
+			} else {
+				DNPRINTF(XT_D_HISTORY, "%s: keeping %s (age %.1f)\n",
+				    __func__, h->uri, age);
+			}
+		}
+	}
+
+	return (0);
+}
+
+int
+insert_history_item(const gchar *uri, const gchar *title, time_t time)
+{
+	struct history		*h;
+
+	if (!(uri && strlen(uri) && title && strlen(title)))
+		return (1);
+
+	h = g_malloc(sizeof(struct history));
+	h->uri = g_strdup(uri);
+	h->title = g_strdup(title);
+	h->time = time;
+
+	DNPRINTF(XT_D_HISTORY, "%s: adding %s\n", __func__, h->uri);
+
+	RB_INSERT(history_list, &hl, h);
+	completion_add_uri(h->uri);
+	hl_purge_count++;
+
+	purge_history();
+	update_history_tabs(NULL);
+
+	return (0);
+}
+
 int
 restore_global_history(void)
 {
 	char			file[PATH_MAX];
 	FILE			*f;
-	struct history		*h;
-	gchar			*uri;
-	gchar			*title;
+	gchar			*uri, *title, *stime, *err = NULL;
+	time_t			time;
+	struct tm		tm;
 	const char		delim[3] = {'\\', '\\', '\0'};
 
 	snprintf(file, sizeof file, "%s/%s", work_dir, XT_HISTORY_FILE);
@@ -1077,29 +1168,44 @@ restore_global_history(void)
 
 		if ((title = fparseln(f, NULL, NULL, delim, 0)) == NULL)
 			if (feof(f) || ferror(f)) {
-				free(uri);
-				warnx("%s: broken history file\n", __func__);
-				return (1);
+				err = "broken history file (title)";
+				goto done;
 			}
 
-		if (uri && strlen(uri) && title && strlen(title)) {
-			webkit_web_history_item_new_with_data(uri, title);
-			h = g_malloc(sizeof(struct history));
-			h->uri = g_strdup(uri);
-			h->title = g_strdup(title);
-			RB_INSERT(history_list, &hl, h);
-			completion_add_uri(h->uri);
-		} else {
-			warnx("%s: failed to restore history\n", __func__);
-			free(uri);
-			free(title);
-			return (1);
+		if ((stime = fparseln(f, NULL, NULL, delim, 0)) == NULL)
+			if (feof(f) || ferror(f)) {
+				err = "broken history file (time)";
+				goto done;
+			}
+
+		if (strptime(stime, "%a %b %d %H:%M:%S %Y", &tm) == NULL) {
+			err = "strptime failed to parse time";
+			goto done;
+		}
+
+		time = mktime(&tm);
+
+		if (insert_history_item(uri, title, time)) {
+			err = "failed to insert item";
+			goto done;
 		}
 
 		free(uri);
 		free(title);
+		free(stime);
 		uri = NULL;
 		title = NULL;
+		stime = NULL;
+	}
+
+done:
+	if (err && strlen(err)) {
+		warnx("%s: %s\n", __func__, err);
+		free(uri);
+		free(title);
+		free(stime);
+
+		return (1);
 	}
 
 	return (0);
@@ -1121,8 +1227,9 @@ save_global_history_to_disk(struct tab *t)
 	}
 
 	RB_FOREACH_REVERSE(h, history_list, &hl) {
-		if (h->uri && h->title)
-			fprintf(f, "%s\n%s\n", h->uri, h->title);
+		if (h->uri && h->title && h->time)
+			fprintf(f, "%s\n%s\n%s", h->uri, h->title,
+			    ctime(&h->time));
 	}
 
 	fclose(f);
@@ -1310,6 +1417,62 @@ save_tabs_and_quit(struct tab *t, struct karg *args)
 	quit(t, NULL);
 
 	return (1);
+}
+
+/* Marshall the internal record of visited URIs into a Javascript hash table in
+ * string form. */
+char *
+color_visited_helper(void)
+{
+	char			*s = NULL;
+	struct history		*h;
+
+	RB_FOREACH_REVERSE(h, history_list, &hl) {
+		if (s == NULL)
+			s = g_strdup_printf("'%s':'dummy'", h->uri);
+		else
+			s = g_strjoin(",", s,
+			    g_strdup_printf("'%s':'dummy'", h->uri), NULL);
+	}
+
+	s = g_strdup_printf("{%s}", s);
+
+	DNPRINTF(XT_D_VISITED, "%s: s = %s\n", __func__, s);
+
+	return (s);
+}
+
+int
+color_visited(struct tab *t, char *visited)
+{
+	char		*s;
+
+	if (t == NULL || visited == NULL) {
+		show_oops(NULL, "%s: invalid parameters", __func__);
+		return (1);
+	}
+
+	/* Create a string representing an annonymous Javascript function, which
+	 * takes a hash table of visited URIs as an argument, goes through the
+	 * links at the current web page and colors them if they indeed been
+	 * visited.
+	 */
+	s = g_strconcat(
+	    "(function(visitedUris) {",
+	    "    for (var i = 0; i < document.links.length; i++)",
+	    "        if (visitedUris[document.links[i].href])",
+	    "            document.links[i].style.color = 'purple';",
+	    "})",
+	    /* Apply the annonymous function to the hash table containing
+	     * visited URIs. */
+	    g_strdup_printf("(%s);", visited),
+	    NULL);
+
+	run_script(t, s);
+	g_free(s);
+	g_free(visited);
+
+	return (0);
 }
 
 int
@@ -2999,7 +3162,8 @@ struct cmd {
 	{ "hinting_newtab",	0,	hint,			XT_HINT_NEWTAB,		0 },
 
 	/* custom stylesheet */
-	{ "userstyle",		0,	userstyle,		0,			0 },
+	{ "userstyle",		0,	userstyle,		XT_STYLE_CURRENT_TAB,	0 },
+	{ "userstyle_global",	0,	userstyle,		XT_STYLE_GLOBAL,	0 },
 
 	/* navigation */
 	{ "goback",		0,	navaction,		XT_NAV_BACK,		0 },
@@ -3775,7 +3939,7 @@ notify_icon_loaded_cb(WebKitWebView *wv, gchar *uri, struct tab *t)
 void
 notify_load_status_cb(WebKitWebView* wview, GParamSpec* pspec, struct tab *t)
 {
-	const gchar		*uri = NULL, *title = NULL;
+	const gchar		*uri = NULL;
 	struct history		*h, find;
 	struct karg		a;
 	GdkColor		color;
@@ -3854,28 +4018,33 @@ notify_load_status_cb(WebKitWebView* wview, GParamSpec* pspec, struct tab *t)
 
 	case WEBKIT_LOAD_FIRST_VISUALLY_NON_EMPTY_LAYOUT:
 		/* 3 */
+		if (color_visited_uris) {
+			color_visited(t, color_visited_helper());
+
+			/* This colors the links you middle-click (open in new
+			 * tab) in the current tab. */
+			if (t->tab_id != gtk_notebook_get_current_page(notebook) &&
+			    (uri = get_uri(t)) != NULL)
+				color_visited(get_current_tab(),
+				    g_strdup_printf("{'%s' : 'dummy'}", uri));
+		}
 		break;
 
 	case WEBKIT_LOAD_FINISHED:
 		/* 2 */
-		uri = get_uri(t);
-		if (uri == NULL)
+		if ((uri = get_uri(t)) == NULL)
 			return;
 
 		if (!strncmp(uri, "http://", strlen("http://")) ||
 		    !strncmp(uri, "https://", strlen("https://")) ||
 		    !strncmp(uri, "file://", strlen("file://"))) {
-			find.uri = uri;
+			find.uri = (gchar *)uri;
 			h = RB_FIND(history_list, &hl, &find);
-			if (!h) {
-				title = get_title(t, FALSE);
-				h = g_malloc(sizeof *h);
-				h->uri = g_strdup(uri);
-				h->title = g_strdup(title);
-				RB_INSERT(history_list, &hl, h);
-				completion_add_uri(h->uri);
-				update_history_tabs(NULL);
-			}
+			if (!h)
+				insert_history_item(uri,
+				    get_title(t, FALSE), time(NULL));
+			else
+				h->time = time(NULL);
 		}
 
 		set_status(t, (char *)uri, XT_STATUS_URI);
@@ -4981,13 +5150,13 @@ wv_keypress_cb(GtkEntry *w, GdkEventKey *e, struct tab *t)
 	/* don't use w directly; use t->whatever instead */
 
 	if (t == NULL) {
-		show_oops(NULL, "wv_keypress_after_cb");
+		show_oops(NULL, "wv_keypress_cb");
 		return (XT_CB_PASSTHROUGH);
 	}
 
 	hide_oops(t);
 
-	DNPRINTF(XT_D_KEY, "wv_keypress_after_cb: mode %d keyval 0x%x mask "
+	DNPRINTF(XT_D_KEY, "wv_keypress_cb: mode %d keyval 0x%x mask "
 	    "0x%x tab %d\n", t->mode, e->keyval, e->state, t->tab_id);
 
 	/* Hide buffers, if they are visible, with escape. */
@@ -5013,7 +5182,7 @@ wv_keypress_cb(GtkEntry *w, GdkEventKey *e, struct tab *t)
 		/* XXX make sure cmd entry is enabled */
 		return (XT_CB_HANDLED);
 	} else if (t->mode == XT_MODE_COMMAND) {
-		/* prefix input*/
+		/* prefix input */
 		snprintf(s, sizeof s, "%c", e->keyval);
 		if (CLEAN(e->state) == 0 && isdigit(s[0]))
 			cmd_prefix = 10 * cmd_prefix + atoi(s);
@@ -6046,7 +6215,7 @@ create_buffers(struct tab *t)
 	gtk_tree_view_set_model
 	    (GTK_TREE_VIEW(view), GTK_TREE_MODEL(buffers_store));
 
-	return view;
+	return (view);
 }
 
 void
@@ -6658,6 +6827,9 @@ create_new_tab(char *title, struct undo *u, int focus, int position)
 		}
 	} else if (load)
 		load_uri(t, title);
+
+	if (userstyle_global)
+		apply_style(t);
 
 	recolor_compact_tabs();
 	setzoom_webkit(t, XT_ZOOM_NORMAL);
