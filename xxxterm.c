@@ -1465,12 +1465,12 @@ toggle_src(struct tab *t, struct karg *args)
 	return (0);
 }
 
-struct edit_src_cb_args{
+struct edit_src_cb_args {
 		WebKitWebFrame *frame;
 		WebKitWebDataSource *data_src;
 };
 
-struct open_external_editor_cb_args{
+struct open_external_editor_cb_args {
 		int fd;
 		int child_pid;
 		char *path;
@@ -1479,19 +1479,6 @@ struct open_external_editor_cb_args{
 		int (*callback)(const char *,gpointer);
 		gpointer cb_data;
 };
-
-int
-edit_src_cb(const char *contents, gpointer data)
-{
-	struct edit_src_cb_args *args;
-
-	args = (struct edit_src_cb_args *)data;
-
-	webkit_web_frame_load_string(args->frame, contents,
-			NULL, webkit_web_data_source_get_encoding(args->data_src),
-			webkit_web_frame_get_uri(args->frame));
-	return 0;
-}
 
 int
 open_external_editor_cb (gpointer data)
@@ -1508,7 +1495,7 @@ open_external_editor_cb (gpointer data)
 	args = (struct open_external_editor_cb_args*)data;
 
 	rv = fstat(args->fd, &st);
-	if (rv == -1){
+	if (rv == -1) {
 		show_oops(args->tab, "fstat error");
 
 		close(args->fd);
@@ -1516,13 +1503,13 @@ open_external_editor_cb (gpointer data)
 		return (0);
 	}
 
-	if (st.st_mtime > args->mtime){
+	if (st.st_mtime > args->mtime) {
 		DPRINTF("File %s has been modified\n", args->path);
 		args->mtime = st.st_mtime;
 
 		contents = g_string_sized_new(1024);
 		rv = lseek(args->fd, SEEK_SET, 0);
-		if (rv == -1){
+		if (rv == -1) {
 			close(args->fd);
 			free(args->path);
 			free(args);
@@ -1531,7 +1518,7 @@ open_external_editor_cb (gpointer data)
 
 		char buf[1024];
 		nb = 0;
-		for (;;){
+		for (;;) {
 			nb = read(args->fd, buf, 1024);
 			if (nb < 0){
 				g_string_free(contents, TRUE);
@@ -1550,7 +1537,7 @@ open_external_editor_cb (gpointer data)
 		}
 
 		DPRINTF("external_editor_cb: contents updated\n");
-		if( args->callback )
+		if (args->callback)
 			args->callback(contents->str, args->cb_data);
 
 		g_string_free(contents, TRUE);
@@ -1558,7 +1545,7 @@ open_external_editor_cb (gpointer data)
 
 	/* Check if child has terminated */
 	rv = waitpid(args->child_pid, &status, WNOHANG);
-	if (rv == -1 || WIFEXITED(status)){
+	if (rv == -1 || WIFEXITED(status)) {
 		close(args->fd);
 		/* Delete the file */
 		unlink(args->path);
@@ -1566,6 +1553,7 @@ open_external_editor_cb (gpointer data)
 		free(args);
 		return 0;
 	}
+
 	return (1);
 }
 
@@ -1576,6 +1564,7 @@ open_external_editor(struct tab *t,
 		int (*callback)(const char *, gpointer),
 		gpointer cb_data)
 {
+	struct open_external_editor_cb_args *a;
 	int fd;
 	char *filename;
 	char *tmpdir = "/tmp";
@@ -1592,7 +1581,7 @@ open_external_editor(struct tab *t,
 	if (P_tmpdir != NULL)
 		tmpdir = P_tmpdir;
 
-	if( suffix == NULL )
+	if (suffix == NULL)
 		suffix = "";
 
 	filename = malloc(strlen(tmpdir) + strlen(suffix) + 15);
@@ -1600,35 +1589,39 @@ open_external_editor(struct tab *t,
 
 	/* Create a temporary file */
 	fd = mkstemps(filename,strlen(suffix));
-	if( fd == -1 ){
+	if (fd == -1) {
 		show_oops(t, "Cannot create temporary file");
 		return(-1);
 	}
 
 	nb = 0;
-	while( nb < strlen(contents) ){
-
-		if( strlen(contents) - nb > 1024 ) cnt = 1024;
-		else cnt = strlen(contents) - nb;
+	while (nb < strlen(contents)) {
+		if (strlen(contents) - nb > 1024)
+			cnt = 1024;
+		else
+			cnt = strlen(contents) - nb;
 
 		rv = write(fd, contents+nb, cnt);
-		if( rv < 0 ){
+		if (rv < 0) {
 			free(filename);
 			close(fd);
 			show_oops(t,strerror(errno));
 			return (-1);
-		} nb += rv;
+		}
+
+		nb += rv;
 	}
 
 	DPRINTF("edit_src: external_editor: %s\n", external_editor);
 
 	nb = 0;
-	for (ptr = external_editor; nb < sizeof(command) - 1 && *ptr; ptr++){
+	for (ptr = external_editor; nb < sizeof(command) - 1 && *ptr; ptr++) {
 
-		if( *ptr == '<' ){
-			if( strncasecmp(ptr, "<file>", 6) == 0 ){
+		if (*ptr == '<') {
+			if (strncasecmp(ptr, "<file>", 6) == 0) {
 				strncpy(command+nb, filename, sizeof(command) - nb - 1);
-				ptr += 5; nb += strlen(filename);
+				ptr += 5;
+				nb += strlen(filename);
 			}
 		}else
 			command[nb++] = *ptr;
@@ -1640,30 +1633,24 @@ open_external_editor(struct tab *t,
 	/* Launch editor */
 	pid = fork();
 	switch (pid) {
-		case -1:
-			show_oops(t, "can't fork to execute editor");
-			return (1);
-			/* NOTREACHED */
-		case 0:
-			break;
-		default:
-			{
-			struct open_external_editor_cb_args *a;
+	case -1:
+		show_oops(t, "can't fork to execute editor");
+		return (1);
+	case 0:
+		break;
+	default:
+		a = malloc(sizeof(struct open_external_editor_cb_args));
+		a->child_pid = pid;
+		a->fd = fd;
+		a->path = filename;
+		a->tab = t;
+		a->mtime = time(NULL);
+		a->callback = callback;
+		a->cb_data = cb_data;
 
-			a = malloc(sizeof(struct open_external_editor_cb_args));
-			a->child_pid = pid;
-			a->fd = fd;
-			a->path = filename;
-			a->tab = t;
-			a->mtime = time(NULL);
-			a->callback = callback;
-			a->cb_data = cb_data;
-
-			/* Check every 100 ms if file has changed */
-			g_timeout_add(100, (GSourceFunc)open_external_editor_cb, (gpointer)a);
-			}
-
-			return (0);
+		/* Check every 100 ms if file has changed */
+		g_timeout_add(100, (GSourceFunc)open_external_editor_cb, (gpointer)a);
+		return (0);
 	}
 
 	/* child */
@@ -1675,27 +1662,39 @@ open_external_editor(struct tab *t,
 }
 
 int
+edit_src_cb(const char *contents, gpointer data)
+{
+	struct edit_src_cb_args *args;
+
+	args = (struct edit_src_cb_args *)data;
+
+	webkit_web_frame_load_string(args->frame, contents,
+			NULL, webkit_web_data_source_get_encoding(args->data_src),
+			webkit_web_frame_get_uri(args->frame));
+	return 0;
+}
+
+int
 edit_src(struct tab *t, struct karg *args)
 {
-	WebKitWebFrame *frame;
-	WebKitWebDataSource *ds;
-	GString *contents;
+	WebKitWebFrame			*frame;
+	WebKitWebDataSource		*ds;
+	GString				*contents;
+	struct edit_src_cb_args		*ext_args;
 
 	if (external_editor == NULL)
 		return (0);
 
 	frame = webkit_web_view_get_focused_frame(t->wv);
 	ds = webkit_web_frame_get_data_source(frame);
-	if (webkit_web_data_source_is_loading(ds)){
+	if (webkit_web_data_source_is_loading(ds)) {
 		show_oops(t,"Webpage is still loading.");
 		return (0);
 	}
 
 	contents = webkit_web_data_source_get_data(ds);
-	if( !contents )
+	if (!contents)
 		show_oops(t,"No contents - opening empty file");
-
-	struct edit_src_cb_args *ext_args;
 
 	ext_args = malloc(sizeof(struct edit_src_cb_args));
 	ext_args->frame = frame;
@@ -1706,7 +1705,7 @@ edit_src(struct tab *t, struct karg *args)
 	return (0);
 }
 
-struct edit_element_cb_args{
+struct edit_element_cb_args {
 	WebKitDOMElement *active;
 	struct tab *tab;
 };
@@ -1714,20 +1713,21 @@ struct edit_element_cb_args{
 int
 edit_element_cb(const char *contents, gpointer data)
 {
-	struct edit_element_cb_args *args;
-	WebKitDOMHTMLTextAreaElement *ta;
-	WebKitDOMHTMLInputElement *el;
+	struct				edit_element_cb_args *args;
+	WebKitDOMHTMLTextAreaElement	*ta;
+	WebKitDOMHTMLInputElement	*el;
 
 	args = (struct edit_element_cb_args*)data;
-	if (!args) return 0;
-	if (!args->active) return 0;
+
+	if (!args || !args->active)
+		return 0;
 
 	el = (WebKitDOMHTMLInputElement*)args->active;
 	ta = (WebKitDOMHTMLTextAreaElement*)args->active;
 
-	if( WEBKIT_DOM_IS_HTML_INPUT_ELEMENT(el) ){
+	if (WEBKIT_DOM_IS_HTML_INPUT_ELEMENT(el)) {
 		webkit_dom_html_input_element_set_value(el, contents);
-	}else if( WEBKIT_DOM_IS_HTML_TEXT_AREA_ELEMENT(ta) ){
+	} else if (WEBKIT_DOM_IS_HTML_TEXT_AREA_ELEMENT(ta)) {
 		webkit_dom_html_text_area_element_set_value(ta, contents);
 	}
 
@@ -1735,36 +1735,36 @@ edit_element_cb(const char *contents, gpointer data)
 }
 
 int
-edit_element_editor(struct tab *t)
+edit_element(struct tab *t, struct karg *a)
 {
-	WebKitDOMHTMLDocument *doc;
-	WebKitDOMElement *active_element;
-	WebKitDOMHTMLTextAreaElement *ta;
-	WebKitDOMHTMLInputElement *el;
-	char *contents;
+	WebKitDOMHTMLDocument		*doc;
+	WebKitDOMElement		*active_element;
+	WebKitDOMHTMLTextAreaElement	*ta;
+	WebKitDOMHTMLInputElement	*el;
+	char				*contents;
+	struct edit_element_cb_args	*args;
 
 	doc = (WebKitDOMHTMLDocument*)webkit_web_view_get_dom_document(t->wv);
 	active_element = webkit_dom_html_document_get_active_element(doc);
 	el = (WebKitDOMHTMLInputElement*)active_element;
 	ta = (WebKitDOMHTMLTextAreaElement*)active_element;
 
-	if (doc == NULL || active_element == NULL ||
-			!(WEBKIT_DOM_IS_HTML_INPUT_ELEMENT(el) ||
-				WEBKIT_DOM_IS_HTML_TEXT_AREA_ELEMENT(ta) )){
+	if (doc == NULL ||
+	    active_element == NULL ||
+	    !(WEBKIT_DOM_IS_HTML_INPUT_ELEMENT(el) ||
+	      WEBKIT_DOM_IS_HTML_TEXT_AREA_ELEMENT(ta))) {
 		show_oops(t, "No active text element!");
 		return -1;
 	}
 
 	contents = "";
-	if( WEBKIT_DOM_IS_HTML_INPUT_ELEMENT(el) ){
+	if (WEBKIT_DOM_IS_HTML_INPUT_ELEMENT(el)) {
 		contents = webkit_dom_html_input_element_get_value(el);
-	}else if( WEBKIT_DOM_IS_HTML_TEXT_AREA_ELEMENT(ta) ){
+	} else if (WEBKIT_DOM_IS_HTML_TEXT_AREA_ELEMENT(ta)) {
 		contents = webkit_dom_html_text_area_element_get_value(ta);
 	}
 
-	struct edit_element_cb_args *args;
-
-	if ((args = malloc(sizeof(struct edit_element_cb_args))) == NULL){
+	if ((args = malloc(sizeof(struct edit_element_cb_args))) == NULL) {
 		return -1;
 	}
 
@@ -1772,8 +1772,7 @@ edit_element_editor(struct tab *t)
 	args->active = active_element;
 
 	open_external_editor(t, contents, NULL, &edit_element_cb,  args);
-	/* Write contents to file */
-	//open_external_editor(t, contents, NULL, edit_element_cb, args);
+
 	return 0;
 }
 
@@ -3292,6 +3291,7 @@ struct cmd {
 	{ "hinting_newtab",	0,	command,		',',			0 },
 	{ "togglesrc",		0,	toggle_src,		0,			0 },
 	{ "editsrc",		0,	edit_src,		0,			0 },
+	{ "editelement",		0,	edit_element,		0,			0 },
 
 	/* yanking and pasting */
 	{ "yankuri",		0,	yank_uri,		0,			0 },
@@ -5278,13 +5278,6 @@ handle_keypress(struct tab *t, GdkEventKey *e, int entry)
 
 	if (!entry && ((e->state & (CTRL | MOD1)) == 0))
 		return buffercmd_addkey(t, e->keyval);
-
-	/* FIXME! Hardcoded? really? */
-	if( entry &&
-			e->state & CTRL && e->keyval == 105 ){
-		DPRINTF("In entry - ctrl+%c\n", e->keyval);
-		edit_element_editor(t);
-	}
 
 	return (XT_CB_PASSTHROUGH);
 }
