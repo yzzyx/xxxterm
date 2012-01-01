@@ -687,6 +687,7 @@ struct key_binding	keys[] = {
 	{ "help",		0,	1,	GDK_F1		},
 	{ "run_script",		MOD1,	1,	GDK_r		},
 	{ "proxy toggle",	0,	1,	GDK_F2		},
+	{ "editelement",	CTRL,	1,	GDK_i		},
 
 	/* search */
 	{ "searchnext",		0,	0,	GDK_n		},
